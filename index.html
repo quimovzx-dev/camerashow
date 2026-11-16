@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Facial Coordinate Tracker & Movement Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for Movement Report Graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Mirror the video and overlay canvas for natural interaction */
+        .mirror {
+            transform: scaleX(-1);
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-indigo-500 selection:text-white">
+
+    <!-- Navbar -->
+    <nav class="border-b border-slate-800 bg-slate-900/70 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-3 h-3 rounded-full bg-emerald-500 animate-ping" id="status-dot"></div>
+                <h1 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
+                    FaceTrack 3D Telemetry
+                </h1>
+                <span class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">478 Landmarks</span>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button id="start-btn" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg transition cursor-pointer shadow-lg shadow-indigo-500/20">
+                    Loading AI Model...
+                </button>
+                <button id="stop-report-btn" class="hidden bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition cursor-pointer shadow-lg shadow-rose-500/20">
+                    Stop & Generate Report
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Dashboard -->
+    <main class="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6 mt-2">
+        
+        <!-- Left Column: Live Camera + Mesh Overlay (7 cols) -->
+        <div class="lg:col-span-7 flex flex-col gap-4">
+            <div class="relative w-full aspect-video bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
+                <video id="webcam" autoplay playsinline class="w-full h-full object-cover mirror"></video>
+                <canvas id="overlay" class="absolute inset-0 w-full h-full object-cover mirror pointer-events-none"></canvas>
+                
+                <!-- HUD Overlay -->
+                <div id="hud-overlay" class="hidden absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-800 px-3 py-2 rounded-xl text-xs font-mono space-y-1">
+                    <div class="text-emerald-400 font-bold flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span> REC TELEMETRY
+                    </div>
+                    <div>Frames Logged: <span id="hud-frames" class="text-white">0</span></div>
+                    <div>FPS: <span id="hud-fps" class="text-cyan-400">0</span></div>
+                    <div>Head Pose: <span id="hud-pose" class="text-amber-400">Center</span></div>
+                </div>
+
+                <!-- Placeholder -->
+                <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/95 text-slate-400 p-6 text-center">
+                    <svg class="w-14 h-14 mb-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                    </svg>
+                    <p class="text-base font-medium text-slate-200">Facial Coordinate & Movement Engine Ready</p>
+                    <p class="text-xs text-slate-400 mt-1 max-w-md">Tracks Eyes, Nose, Mouth, Ears & 478 3D coordinates in real time. Click "Start Tracking" above to begin logging data.</p>
+                </div>
+            </div>
+
+            <!-- Live Behavioral Telemetry Cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
+                    <div class="text-xs text-slate-400">Blinks Detected</div>
+                    <div id="stat-blinks" class="text-2xl font-bold text-cyan-400 mt-1">0</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
+                    <div class="text-xs text-slate-400">Mouth State</div>
+                    <div id="stat-mouth" class="text-2xl font-bold text-emerald-400 mt-1">Closed</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
+                    <div class="text-xs text-slate-400">Head Stability</div>
+                    <div id="stat-stability" class="text-2xl font-bold text-indigo-400 mt-1">100%</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
+                    <div class="text-xs text-slate-400">Gaze Direction</div>
+                    <div id="stat-gaze" class="text-2xl font-bold text-amber-400 mt-1">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Live XYZ Coordinates Feed (5 cols) -->
+        <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+                    <h2 class="font-semibold text-slate-200">Live 3D Landmark Coordinates</h2>
+                    <span class="text-[11px] font-mono text-slate-400">Normalized (0.0 - 1.0)</span>
+                </div>
+
+                <!-- Key Landmark Coordinate Table -->
+                <div class="space-y-2.5 font-mono text-xs">
+                    <!-- Nose Tip -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                        <span class="text-rose-400 font-bold">● Nose Tip (#1)</span>
+                        <span id="coord-nose" class="text-slate-300">X: 0.000 | Y: 0.000 | Z: 0.000</span>
+                    </div>
+                    <!-- Left Eye -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                        <span class="text-cyan-400 font-bold">● Left Eye (#33)</span>
+                        <span id="coord-leye" class="text-slate-300">X: 0.000 | Y: 0.000 | Z: 0.000</span>
+                    </div>
+                    <!-- Right Eye -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                        <span class="text-cyan-400 font-bold">● Right Eye (#263)</span>
+                        <span id="coord-reye" class="text-slate-300">X: 0.000 | Y: 0.000 | Z: 0.000</span>
+                    </div>
+                    <!-- Mouth Center -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                        <span class="text-emerald-400 font-bold">● Mouth (#13/#14)</span>
+                        <span id="coord-mouth" class="text-slate-300">X: 0.000 | Y: 0.000 | Z: 0.000</span>
+                    </div>
+                    <!-- Left Ear -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                        <span class="text-amber-400 font-bold">● Left Ear (#234)</span>
+                        <span id="coord-lear" class="text-slate-300">X: 0.000 | Y: 0.000 | Z: 0.000</span>
+                    </div>
+                    <!-- Right Ear -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex justify-between items-center">
+                        <span class="text-amber-400 font-bold">● Right Ear (#454)</span>
+                        <span id="coord-rear" class="text-slate-300">X: 0.000 | Y: 0.000 | Z: 0.000</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mesh Display Toggles -->
+            <div class="mt-4 pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                    <input type="checkbox" id="toggle-mesh" checked class="accent-indigo-500 rounded">
+                    Show 478-Point Mesh
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                    <input type="checkbox" id="toggle-trail" checked class="accent-indigo-500 rounded">
+                    Show Nose Movement Trail
+                </label>
+            </div>
+        </div>
+    </main>
+
+    <!-- ANALYTICS REPORT MODAL / SECTION (Appears after stopping) -->
+    <section id="report-section" class="hidden max-w-7xl mx-auto p-4 mt-4 mb-12">
+        <div class="bg-slate-900 border border-indigo-500/40 rounded-2xl p-6 shadow-2xl">
+            <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-6">
+                <div>
+                    <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">Session Complete</span>
+                    <h2 class="text-2xl font-bold text-white">Facial Coordinate Movement Report</h2>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <button id="download-csv-btn" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition cursor-pointer">
+                        Download CSV Dataset
+                    </button>
+                    <button id="download-json-btn" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition cursor-pointer">
+                        Download Full JSON (All 478 pts)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Executive Summary Metrics -->
+            <div id="report-summary-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <!-- Populated dynamically -->
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Trajectory Heatmap Canvas -->
+                <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <h3 class="text-sm font-semibold text-slate-300 mb-2">2D Spatial Movement Trajectory (Nose & Head Path)</h3>
+                    <p class="text-xs text-slate-500 mb-3">Visualizes every coordinate point visited during the session.</p>
+                    <div class="aspect-video bg-slate-900 rounded-lg overflow-hidden border border-slate-800">
+                        <canvas id="trajectory-canvas" class="w-full h-full"></canvas>
+                    </div>
+                </div>
+
+                <!-- Time-Series Movement Graph -->
+                <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-300 mb-2">Coordinate Displacement & Velocity Over Time</h3>
+                        <p class="text-xs text-slate-500 mb-3">Tracks X/Y shifts and micro-movement spikes frame-by-frame.</p>
+                    </div>
+                    <div class="relative h-64 w-full">
+                        <canvas id="movement-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- MediaPipe Tasks Vision Module -->
+    <script type="module">
+        import { FaceLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+        // DOM Elements
+        const video = document.getElementById("webcam");
+        const canvas = document.getElementById("overlay");
+        const ctx = canvas.getContext("2d");
+        const startBtn = document.getElementById("start-btn");
+        const stopReportBtn = document.getElementById("stop-report-btn");
+        const placeholder = document.getElementById("camera-placeholder");
+        const hudOverlay = document.getElementById("hud-overlay");
+        const reportSection = document.getElementById("report-section");
+
+        // State Variables
+        let faceLandmarker;
+        let running = false;
+        let stream = null;
+        let sessionData = [];
+        let noseTrail = [];
+        let blinkCount = 0;
+        let isBlinking = false;
+        let lastFrameTime = performance.now();
+        let sessionStartTime = 0;
+        let chartInstance = null;
+
+        // Key Landmark Indices (MediaPipe 478 Mesh)
+        const IDX = {
+            NOSE: 1,
+            LEFT_EYE: 33,
+            RIGHT_EYE: 263,
+            UPPER_LIP: 13,
+            LOWER_LIP: 14,
+            LEFT_EAR: 234,
+            RIGHT_EAR: 454,
+            // Eye vertical landmarks for blink detection
+            L_EYE_TOP: 159, L_EYE_BOT: 145,
+            R_EYE_TOP: 386, R_EYE_BOT: 374
+        };
+
+        // 1. Initialize MediaPipe FaceLandmarker
+        async function initModel() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+                );
+                faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    outputFaceBlendshapes: true,
+                    runningMode: "VIDEO",
+                    numFaces: 1
+                });
+                startBtn.textContent = "Start Camera & Track";
+                startBtn.disabled = false;
+            } catch (err) {
+                console.error(err);
+                startBtn.textContent = "Error Loading Model";
+            }
+        }
+        initModel();
+
+        // 2. Start Camera & Telemetry Logging
+        startBtn.addEventListener("click", async () => {
+            if (!faceLandmarker) return;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    
+                    // Reset session state
+                    sessionData = [];
+                    noseTrail = [];
+                    blinkCount = 0;
+                    sessionStartTime = performance.now();
+                    running = true;
+
+                    // UI Updates
+                    placeholder.classList.add("hidden");
+                    hudOverlay.classList.remove("hidden");
+                    startBtn.classList.add("hidden");
+                    stopReportBtn.classList.remove("hidden");
+                    reportSection.classList.add("hidden");
+
+                    predictWebcam();
+                }, { once: true });
+            } catch (err) {
+                alert("Camera access denied or unavailable. Make sure you run this on HTTPS or localhost.");
+            }
+        });
+
+        // 3. Stop Camera & Build Movement Report
+        stopReportBtn.addEventListener("click", () => {
+            running = false;
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+            placeholder.classList.remove("hidden");
+            hudOverlay.classList.add("hidden");
+            stopReportBtn.classList.add("hidden");
+            startBtn.classList.remove("hidden");
+            startBtn.textContent = "Start New Session";
+
+            generateReport();
+        });
+
+        // Helper: Euclidean Distance
+        const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+        // 4. Real-Time Prediction Loop
+        async function predictWebcam() {
+            if (!running) return;
+
+            const now = performance.now();
+            const fps = Math.round(1000 / (now - lastFrameTime));
+            lastFrameTime = now;
+
+            const results = faceLandmarker.detectForVideo(video, now);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+                const lm = results.faceLandmarks[0];
+                const drawingUtils = new DrawingUtils(ctx);
+
+                // Draw 478 Face Mesh if toggled
+                if (document.getElementById("toggle-mesh").checked) {
+                    drawingUtils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {
+                        color: "rgba(99, 102, 241, 0.22)", lineWidth: 1
+                    });
+                    drawingUtils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, { color: "#22d3ee", lineWidth: 1.5 });
+                    drawingUtils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE, { color: "#22d3ee", lineWidth: 1.5 });
+                    drawingUtils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS, { color: "#34d399", lineWidth: 1.5 });
+                }
+
+                // Extract Key Features
+                const nose = lm[IDX.NOSE];
+                const lEye = lm[IDX.LEFT_EYE];
+                const rEye = lm[IDX.RIGHT_EYE];
+                const uLip = lm[IDX.UPPER_LIP];
+                const lLip = lm[IDX.LOWER_LIP];
+                const lEar = lm[IDX.LEFT_EAR];
+                const rEar = lm[IDX.RIGHT_EAR];
+
+                // Highlight Key Points on Canvas
+                const keyPoints = [
+                    { pt: nose, color: "#fb7185" },
+                    { pt: lEye, color: "#22d3ee" },
+                    { pt: rEye, color: "#22d3ee" },
+                    { pt: uLip, color: "#34d399" },
+                    { pt: lEar, color: "#fbbf24" },
+                    { pt: rEar, color: "#fbbf24" }
+                ];
+
+                keyPoints.forEach(item => {
+                    ctx.beginPath();
+                    ctx.arc(item.pt.x * canvas.width, item.pt.y * canvas.height, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = item.color;
+                    ctx.fill();
+                });
+
+                // Draw Movement Trail
+                noseTrail.push({ x: nose.x, y: nose.y });
+                if (noseTrail.length > 120) noseTrail.shift();
+
+                if (document.getElementById("toggle-trail").checked && noseTrail.length > 1) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = "rgba(251, 113, 133, 0.85)";
+                    ctx.lineWidth = 3;
+                    noseTrail.forEach((p, i) => {
+                        if (i === 0) ctx.moveTo(p.x * canvas.width, p.y * canvas.height);
+                        else ctx.lineTo(p.x * canvas.width, p.y * canvas.height);
+                    });
+                    ctx.stroke();
+                }
+
+                // Calculate Behavioral Metrics
+                // 1) Blink Detection
+                const lEyeOpen = dist(lm[IDX.L_EYE_TOP], lm[IDX.L_EYE_BOT]);
+                const rEyeOpen = dist(lm[IDX.R_EYE_TOP], lm[IDX.R_EYE_BOT]);
+                const eyeWidth = dist(lEye, rEye);
+                const earRatio = (lEyeOpen + rEyeOpen) / (2 * eyeWidth);
+
+                if (earRatio < 0.045 && !isBlinking) {
+                    isBlinking = true;
+                    blinkCount++;
+                } else if (earRatio >= 0.045) {
+                    isBlinking = false;
+                }
+
+                // 2) Mouth Openness
+                const mouthOpenDist = dist(uLip, lLip) / eyeWidth;
+                const mouthState = mouthOpenDist > 0.18 ? "Open / Speaking" : "Closed";
+
+                // 3) Head Pose Estimation (Yaw & Pitch)
+                const earMidX = (lEar.x + rEar.x) / 2;
+                const earMidY = (lEar.y + rEar.y) / 2;
+                const yawOffset = nose.x - earMidX;
+                const pitchOffset = nose.y - earMidY;
+
+                let pose = "Center";
+                if (yawOffset > 0.04) pose = "Looking Left";
+                else if (yawOffset < -0.04) pose = "Looking Right";
+                else if (pitchOffset < -0.02) pose = "Looking Up";
+                else if (pitchOffset > 0.06) pose = "Looking Down";
+
+                // 4) Velocity / Displacement from previous frame
+                let velocity = 0;
+                if (sessionData.length > 0) {
+                    const prev = sessionData[sessionData.length - 1].nose;
+                    velocity = Math.hypot(nose.x - prev.x, nose.y - prev.y) * 100;
+                }
+                const stability = Math.max(0, Math.min(100, Math.round(100 - velocity * 25)));
+
+                // Update Live UI
+                const fmt = (p) => `X:${p.x.toFixed(3)} Y:${p.y.toFixed(3)} Z:${p.z.toFixed(3)}`;
+                document.getElementById("coord-nose").textContent = fmt(nose);
+                document.getElementById("coord-leye").textContent = fmt(lEye);
+                document.getElementById("coord-reye").textContent = fmt(rEye);
+                document.getElementById("coord-mouth").textContent = fmt(uLip);
+                document.getElementById("coord-lear").textContent = fmt(lEar);
+                document.getElementById("coord-rear").textContent = fmt(rEar);
+
+                document.getElementById("hud-frames").textContent = sessionData.length + 1;
+                document.getElementById("hud-fps").textContent = fps;
+                document.getElementById("hud-pose").textContent = pose;
+
+                document.getElementById("stat-blinks").textContent = blinkCount;
+                document.getElementById("stat-mouth").textContent = mouthState;
+                document.getElementById("stat-stability").textContent = `${stability}%`;
+                document.getElementById("stat-gaze").textContent = pose.replace("Looking ", "");
+
+                // Save Telemetry Frame
+                sessionData.push({
+                    timestampSec: Number(((now - sessionStartTime) / 1000).toFixed(2)),
+                    nose: { x: nose.x, y: nose.y, z: nose.z },
+                    leftEye: { x: lEye.x, y: lEye.y, z: lEye.z },
+                    rightEye: { x: rEye.x, y: rEye.y, z: rEye.z },
+                    mouth: { x: uLip.x, y: uLip.y, z: uLip.z },
+                    leftEar: { x: lEar.x, y: lEar.y, z: lEar.z },
+                    rightEar: { x: rEar.x, y: rEar.y, z: rEar.z },
+                    pose,
+                    mouthState,
+                    velocity: Number(velocity.toFixed(3)),
+                    all478Landmarks: lm // Stored for full JSON export
+                });
+            }
+
+            requestAnimationFrame(predictWebcam);
+        }
+
+        // 5. Generate Analytics & Movement Report
+        function generateReport() {
+            if (sessionData.length === 0) {
+                alert("No facial data was captured during this session.");
+                return;
+            }
+
+            reportSection.classList.remove("hidden");
+            reportSection.scrollIntoView({ behavior: "smooth" });
+
+            const durationSec = sessionData[sessionData.length - 1].timestampSec || 1;
+            const totalDistance = sessionData.reduce((acc, f) => acc + f.velocity, 0).toFixed(2);
+            const avgVelocity = (totalDistance / sessionData.length).toFixed(3);
+
+            // Dominant Pose calculation
+            const poseCounts = {};
+            sessionData.forEach(d => poseCounts[d.pose] = (poseCounts[d.pose] || 0) + 1);
+            const dominantPose = Object.entries(poseCounts).sort((a, b) => b[1] - a[1])[0][0];
+
+            // Render Summary Cards
+            document.getElementById("report-summary-cards").innerHTML = `
+                <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div class="text-xs text-slate-400">Session Duration & Frames</div>
+                    <div class="text-xl font-bold text-white mt-1">${durationSec}s <span class="text-xs font-normal text-slate-400">(${sessionData.length} pts)</span></div>
+                </div>
+                <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div class="text-xs text-slate-400">Total Coordinate Shift</div>
+                    <div class="text-xl font-bold text-rose-400 mt-1">${totalDistance} units</div>
+                </div>
+                <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div class="text-xs text-slate-400">Dominant Head Orientation</div>
+                    <div class="text-xl font-bold text-amber-400 mt-1">${dominantPose}</div>
+                </div>
+                <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div class="text-xs text-slate-400">Total Blinks / Avg Speed</div>
+                    <div class="text-xl font-bold text-cyan-400 mt-1">${blinkCount} blinks <span class="text-xs font-normal text-slate-400">(${avgVelocity}/f)</span></div>
+                </div>
+            `;
+
+            // Draw 2D Spatial Trajectory Map
+            const trajCanvas = document.getElementById("trajectory-canvas");
+            const tCtx = trajCanvas.getContext("2d");
+            trajCanvas.width = 640;
+            trajCanvas.height = 360;
+
+            tCtx.fillStyle = "#0f172a";
+            tCtx.fillRect(0, 0, trajCanvas.width, trajCanvas.height);
+
+            // Grid lines
+            tCtx.strokeStyle = "#1e293b";
+            tCtx.lineWidth = 1;
+            for (let x = 0; x < 640; x += 40) { tCtx.beginPath(); tCtx.moveTo(x, 0); tCtx.lineTo(x, 360); tCtx.stroke(); }
+            for (let y = 0; y < 360; y += 40) { tCtx.beginPath(); tCtx.moveTo(0, y); tCtx.lineTo(640, y); tCtx.stroke(); }
+
+            // Plot mirrored nose coordinates
+            tCtx.beginPath();
+            tCtx.strokeStyle = "#38bdf8";
+            tCtx.lineWidth = 2.5;
+            sessionData.forEach((frame, idx) => {
+                const px = (1 - frame.nose.x) * trajCanvas.width;
+                const py = frame.nose.y * trajCanvas.height;
+                if (idx === 0) tCtx.moveTo(px, py);
+                else tCtx.lineTo(px, py);
+            });
+            tCtx.stroke();
+
+            // Start & End markers
+            const startPt = sessionData[0].nose;
+            const endPt = sessionData[sessionData.length - 1].nose;
+            tCtx.fillStyle = "#10b981";
+            tCtx.beginPath(); tCtx.arc((1 - startPt.x) * 640, startPt.y * 360, 6, 0, Math.PI * 2); tCtx.fill();
+            tCtx.fillStyle = "#f43f5e";
+            tCtx.beginPath(); tCtx.arc((1 - endPt.x) * 640, endPt.y * 360, 6, 0, Math.PI * 2); tCtx.fill();
+
+            // Render Time-Series Chart
+            if (chartInstance) chartInstance.destroy();
+            const chartCtx = document.getElementById("movement-chart").getContext("2d");
+            
+            // Downsample if > 150 frames for clean chart rendering
+            const step = Math.ceil(sessionData.length / 150);
+            const sampled = sessionData.filter((_, i) => i % step === 0);
+
+            chartInstance = new Chart(chartCtx, {
+                type: "line",
+                data: {
+                    labels: sampled.map(d => `${d.timestampSec}s`),
+                    datasets: [
+                        {
+                            label: "Nose X Coordinate",
+                            data: sampled.map(d => (1 - d.nose.x).toFixed(3)),
+                            borderColor: "#818cf8",
+                            tension: 0.3,
+                            pointRadius: 0
+                        },
+                        {
+                            label: "Nose Y Coordinate",
+                            data: sampled.map(d => d.nose.y.toFixed(3)),
+                            borderColor: "#34d399",
+                            tension: 0.3,
+                            pointRadius: 0
+                        },
+                        {
+                            label: "Movement Spike Velocity",
+                            data: sampled.map(d => d.velocity),
+                            borderColor: "#fb7185",
+                            tension: 0.3,
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: "#cbd5e1", font: { size: 11 } } } },
+                    scales: {
+                        x: { ticks: { color: "#64748b", maxTicksLimit: 8 }, grid: { color: "#1e293b" } },
+                        y: { ticks: { color: "#64748b" }, grid: { color: "#1e293b" } }
+                    }
+                }
+            });
+        }
+
+        // 6. Export Functions (CSV & JSON)
+        document.getElementById("download-csv-btn").addEventListener("click", () => {
+            const headers = [
+                "Time(s)", "Pose", "MouthState", "Velocity",
+                "Nose_X", "Nose_Y", "Nose_Z",
+                "LeftEye_X", "LeftEye_Y", "LeftEye_Z",
+                "RightEye_X", "RightEye_Y", "RightEye_Z",
+                "Mouth_X", "Mouth_Y", "Mouth_Z",
+                "LeftEar_X", "LeftEar_Y", "LeftEar_Z",
+                "RightEar_X", "RightEar_Y", "RightEar_Z"
+            ];
+            const rows = sessionData.map(d => [
+                d.timestampSec, d.pose, d.mouthState, d.velocity,
+                d.nose.x, d.nose.y, d.nose.z,
+                d.leftEye.x, d.leftEye.y, d.leftEye.z,
+                d.rightEye.x, d.rightEye.y, d.rightEye.z,
+                d.mouth.x, d.mouth.y, d.mouth.z,
+                d.leftEar.x, d.leftEar.y, d.leftEar.z,
+                d.rightEar.x, d.rightEar.y, d.rightEar.z
+            ].join(","));
+
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI(csvContent));
+            link.setAttribute("download", `facial_coordinates_report_${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        });
+
+        document.getElementById("download-json-btn").addEventListener("click", () => {
+            const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `full_478_landmarks_${Date.now()}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>
